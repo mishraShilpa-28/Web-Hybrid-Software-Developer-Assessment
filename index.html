@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Indices Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 250px;
+            background-color: #f8f9fa;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar h2 {
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        .list-wrapper {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .sidebar ul {
+            list-style: none;
+        }
+        .sidebar li {
+            padding: 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-bottom: 5px;
+            transition: background-color 0.3s;
+        }
+        .sidebar li:hover {
+            background-color: #e9ecef;
+        }
+        .sidebar li.selected {
+            background-color: #007bff;
+            color: white;
+        }
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .main-content h2 {
+            margin-bottom: 10px;
+        }
+        .checkbox-group {
+            margin-bottom: 20px;
+        }
+        .checkbox-group label {
+            margin-right: 15px;
+        }
+        #chart-container {
+            position: relative;
+            height: 80vh;
+        }
+        #statsPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 4px;
+            width: 180px;
+            font-size: 14px;
+        }
+        #statsPanel h4 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+        }
+        #statsPanel p {
+            margin: 4px 0;
+        }
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 30vh;
+            }
+            .list-wrapper {
+                max-height: 30vh;
+                overflow-y: auto;
+            }
+            #chart-container {
+                height: 50vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h2>Indices</h2>
+            <div class="list-wrapper">
+                <ul id="indices-list"></ul>
+            </div>
+        </div>
+        <div class="main-content">
+            <h2 id="selected-index">Select an index</h2>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="openCheckbox"> Open</label>
+                <label><input type="checkbox" id="highCheckbox"> High</label>
+                <label><input type="checkbox" id="lowCheckbox"> Low</label>
+                <label><input type="checkbox" id="closingCheckbox" checked> Close</label>
+                <label><input type="checkbox" id="volumeCheckbox"> Volume</label>
+            </div>
+            <div id="chart-container">
+                <canvas id="chart"></canvas>
+                <div id="statsPanel">
+                    <h4>Latest Stats</h4>
+                    <p>Turnover (Rs Cr): <span id="turnoverVal">--</span></p>
+                    <p>P/E Ratio: <span id="peVal">--</span></p>
+                    <p>P/B Ratio: <span id="pbVal">--</span></p>
+                    <p>Div. Yield: <span id="divVal">--</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
+    <script>
+        let chart;
+        let parsedData = [];
+        let selectedIndex = null;
+
+        // Data fields for chart and stats
+        const fields = [
+            { id: 'openCheckbox', field: 'open_index_value', label: 'Open', color: 'rgba(75,192,192,1)' },
+            { id: 'highCheckbox', field: 'high_index_value', label: 'High', color: 'rgba(255,99,132,1)' },
+            { id: 'lowCheckbox', field: 'low_index_value', label: 'Low', color: 'rgba(54,162,235,1)' },
+            { id: 'closingCheckbox', field: 'closing_index_value', label: 'Close', color: 'rgba(255,206,86,1)' },
+            { id: 'volumeCheckbox', field: 'volume', label: 'Volume', color: 'rgba(153,102,255,1)' }
+        ];
+
+        // Fetch and parse CSV data
+        fetch('https://raw.githubusercontent.com/shaktids/stock_app_test/refs/heads/main/dump.csv')
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to fetch CSV');
+                return response.text();
+            })
+            .then(csvData => {
+                Papa.parse(csvData, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        parsedData = results.data;
+                        populateIndicesList();
+                    },
+                    error: function(error) {
+                        console.error('Parsing error:', error);
+                        alert('Error parsing CSV data');
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                alert('Error loading data');
+            });
+
+        // Populate sidebar with indices
+        function populateIndicesList() {
+            const indices = [...new Set(parsedData.map(row => row.index_name))].sort();
+            const list = document.getElementById('indices-list');
+            indices.forEach(index => {
+                const li = document.createElement('li');
+                li.textContent = index;
+                li.addEventListener('click', () => {
+                    document.querySelectorAll('.sidebar li').forEach(el => el.classList.remove('selected'));
+                    li.classList.add('selected');
+                    selectedIndex = index;
+                    displayChart();
+                });
+                list.appendChild(li);
+            });
+        }
+
+        // Initialize Chart.js
+        const ctx = document.getElementById('chart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DD',
+                            unit: 'day',
+                            displayFormats: { day: 'MMM D, YYYY' }
+                        },
+                        title: { display: true, text: 'Date' }
+                    },
+                    y: {
+                        beginAtZero: false,
+                        title: { display: true, text: 'Value' }
+                    }
+                }
+            }
+        });
+
+        // Display chart and stats
+        function displayChart() {
+            if (!selectedIndex) {
+                chart.data.labels = [];
+                chart.data.datasets = [];
+                chart.update();
+                document.getElementById('selected-index').textContent = 'Select an index';
+                resetStats();
+                return;
+            }
+
+            const filteredData = parsedData.filter(row => row.index_name === selectedIndex);
+            filteredData.sort((a, b) => new Date(a.index_date) - new Date(b.index_date));
+            const dates = filteredData.map(row => row.index_date);
+
+            // Create datasets based on checked boxes
+            const datasets = [];
+            fields.forEach(field => {
+                const checkbox = document.getElementById(field.id);
+                if (checkbox && checkbox.checked) {
+                    const values = filteredData.map(row => {
+                        const value = parseFloat(row[field.field]);
+                        return isNaN(value) ? null : value;
+                    });
+                    datasets.push({
+                        label: field.label,
+                        data: values,
+                        borderColor: field.color,
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 3,
+                        borderWidth: 2
+                    });
+                }
+            });
+
+            chart.data.labels = dates;
+            chart.data.datasets = datasets;
+            chart.update();
+
+            // Update stats panel
+            const latest = filteredData[filteredData.length - 1];
+            document.getElementById('turnoverVal').textContent = latest.turnover_rs_cr || '--';
+            document.getElementById('peVal').textContent = latest.pe_ratio || '--';
+            document.getElementById('pbVal').textContent = latest.pb_ratio || '--';
+            document.getElementById('divVal').textContent = latest.div_yield || '--';
+
+            document.getElementById('selected-index').textContent = selectedIndex;
+        }
+
+        // Reset stats panel
+        function resetStats() {
+            document.getElementById('turnoverVal').textContent = '--';
+            document.getElementById('peVal').textContent = '--';
+            document.getElementById('pbVal').textContent = '--';
+            document.getElementById('divVal').textContent = '--';
+        }
+
+        // Add event listeners to checkboxes
+        fields.forEach(field => {
+            const checkbox = document.getElementById(field.id);
+            checkbox.addEventListener('change', () => {
+                if (selectedIndex) displayChart();
+            });
+        });
+    </script>
+</body>
+</html>
